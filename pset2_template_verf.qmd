@@ -1,0 +1,663 @@
+---
+title: "30538 Problem Set 2: Parking Tickets"
+author: "Kohei Inagaki"
+date: "10/19/2024"
+format: 
+    pdf: 
+        code-overflow: wrap
+execute:
+  eval: true 
+  echo: true
+  include: true
+---
+
+
+1. "This submission is my work alone and complies with the 30538 integrity
+policy." Add your initials to indicate your agreement: \*\*\_KI\_\*\*
+2. "I have uploaded the names of anyone I worked with on the problem set **[here](https://docs.google.com/forms/d/1-zzHx762odGlpVWtgdIC55vqF-j3gqdAp6Pno1rIGK0/edit)**"  \*\*\_Yes\_\*\* (1 point)
+3. Late coins used this pset: \*\*\_0\_*\* Late coins left after submission: \*\*\_3\_*\*
+4. Knit your `ps1.qmd` to make `ps1.pdf`. 
+    * The PDF should not be more than 25 pages. Use `head()` and re-size figures when appropriate. 
+5. Push  `ps1.qmd` and `ps1.pdf` to your github repo. It is fine to use Github Desktop.
+6. Submit `ps1.pdf` via Gradescope (4 points) 
+7. Tag your submission in Gradescope
+
+
+```{python}
+import pandas as pd
+import altair as alt
+alt.renderers.enable("png")
+import time
+
+import warnings 
+warnings.filterwarnings('ignore')
+```
+
+## Data cleaning continued (15 points)
+
+1. 
+```{python}
+#1-1
+file_path = 'C:/Users/kohei/Python/parking_tickets_one_percent.csv'
+
+def read_parking_tickets(file_path):
+    df = pd.read_csv(file_path, index_col=False)
+    na_count = df.isna().sum()
+    na_count_df = pd.DataFrame({'Variable': na_count.index, 'Numbers of NA': na_count.values})
+    na_count_df = na_count_df[~na_count_df['Variable'].str.contains('Unnamed')]
+    
+    return na_count_df
+
+df_na_count = read_parking_tickets(file_path)
+
+print(df_na_count)
+``` 
+2.  
+```
+##1-2
+#The three variables—notice_level, hearing_disposition, and zipcode—have 
+more missing values because: 
+notice_level: This is usually only filled in when the ticket goes to a higher level, 
+such as when a fine is overdue, so it might not needed for most tickets.
+hearing_disposition: This is only used when someone disputes the ticket 
+and a hearing is held, which doesn't happen often. 
+zipcode: If the location of the violation isn't fully recorded or is unclear, 
+the zipcode may be left blank, especially for tickets issued outside the city or 
+in uncertain areas.
+```
+
+3.  
+```{python}
+##1-3
+file_path = 'C:/Users/kohei/Python/parking_tickets_one_percent.csv'
+df = pd.read_csv(file_path, index_col=False)
+
+filtered_df = df[
+    (
+        (df['violation_description'] == 'NO CITY STICKER OR IMPROPER DISPLAY') |
+        (df['violation_description'] == 'NO CITY STICKER VEHICLE UNDER/EQUAL TO 16,000 LBS.')
+    ) &
+    ((df['fine_level1_amount'] == 120) | (df['fine_level1_amount'] == 200))
+]
+
+old_violation_code = filtered_df[filtered_df['fine_level1_amount'] == 120]['violation_code'].unique()
+new_violation_code = filtered_df[filtered_df['fine_level1_amount'] == 200]['violation_code'].unique()
+
+print("Old violation code (120):")
+for code in old_violation_code:
+    print(code)
+
+print("\nNew violation code (200):")
+for code in new_violation_code:
+    print(code)
+
+old_subset = filtered_df[filtered_df['fine_level1_amount'] == 120]
+new_subset = filtered_df[filtered_df['fine_level1_amount'] == 200]
+
+print(f"\nOld violation code subset shape: {old_subset.shape}")
+print(f"New violation code subset shape: {new_subset.shape}")
+```
+ 
+## While the penalty was originally $120, it was increased to $200. 
+
+## Revenue increase from "missing city sticker" tickets (20 Points)
+
+1.
+```{python}
+file_path = 'C:/Users/kohei/Python/parking_tickets_one_percent.csv'
+df = pd.read_csv(file_path)
+
+df['combined_code'] = df.apply(lambda x: '964125_0964125B' if x['violation_code'] in ['964125', '0964125B'] else '', axis=1)
+
+df['violation_date'] = pd.to_datetime(df['issue_date'], errors='coerce')
+
+df['month'] = df['violation_date'].dt.to_period('M').dt.to_timestamp()
+
+monthly_counts = df[df['combined_code'] != ''].groupby('month').size().reset_index(name='ticket_count')
+
+chart = alt.Chart(monthly_counts).mark_line().encode(
+    x=alt.X('month:T', title='Month'),
+    y=alt.Y('ticket_count:Q', title='Number of Tickets')
+).properties(
+    title='Monthly Missing City Sticker Tickets'
+)
+
+chart.show()
+```
+
+
+2. 
+```{python}
+df['violation_code'] = df['violation_code'].apply(lambda x: '964125_0964125B' if x in ['964125', '0964125B'] else x)
+
+df['violation_date'] = pd.to_datetime(df['issue_date'], errors='coerce')
+
+df['month'] = df['violation_date'].dt.to_period('M').dt.to_timestamp()
+
+monthly_counts = df[df['violation_code'] == '964125_0964125B'].groupby('month').size().reset_index(name='ticket_count')
+
+price_increase_date = df[(df['fine_level1_amount'] == 200) & (df['violation_code'] == '964125_0964125B')]['violation_date'].min()
+
+if pd.isna(price_increase_date):
+    print("no dates")
+else:
+    print(f"price increase: {price_increase_date}")
+
+    chart = alt.Chart(monthly_counts).mark_line().encode(
+        x=alt.X('month:T', title='Month'),
+        y=alt.Y('ticket_count:Q', title='Number of Tickets')
+    ).properties(
+        title='Monthly Missing City Sticker Tickets (Unified Code: 964125_0964125B)'
+    )
+
+    rule = alt.Chart(pd.DataFrame({'date': [price_increase_date]})).mark_rule(color='red').encode(
+        x='date:T'
+    )
+
+    text = alt.Chart(pd.DataFrame({'date': [price_increase_date]})).mark_text(
+        align='left',
+        baseline='middle',
+        dx=5
+    ).encode(
+        x='date:T',
+        text=alt.value('Price Increase')
+    )
+
+    chart = chart + rule + text
+
+    chart.show()
+
+  ## I have referred to the following page:
+  #  https://altair-viz.github.io/user_guide/marks/rule.html
+
+```
+
+3. 
+```{python}
+df_prior = df[(df['violation_date'] >= price_increase_date - pd.DateOffset(years=1)) & 
+              (df['violation_date'] < price_increase_date) & 
+              (df['violation_code'] == '964125_0964125B')]
+
+revenue_before = df_prior['fine_level1_amount'].sum()
+
+new_ticket_price = 200
+projected_revenue_after = new_ticket_price * len(df_prior)
+
+revenue_increase = (projected_revenue_after - revenue_before) * 100
+
+print(f"Estimated revenue increase: ${revenue_increase:.2f}")
+
+```
+
+
+4.
+```{python}
+df_after = df[(df['violation_date'] >= price_increase_date) & 
+              (df['violation_date'] < price_increase_date + pd.DateOffset(years=1)) & 
+              (df['violation_code'] == '964125_0964125B')]
+
+total_tickets_after = len(df_after)
+paid_tickets_after = len(df_after[df_after['total_payments'] > 0])  
+repayment_rate_after = paid_tickets_after / total_tickets_after
+
+df_prior = df[(df['violation_date'] >= price_increase_date - pd.DateOffset(years=1)) & 
+              (df['violation_date'] < price_increase_date) & 
+              (df['violation_code'] == '964125_0964125B')]
+
+revenue_before = df_prior['fine_level1_amount'].sum()
+
+new_ticket_price = 200
+expected_paid_tickets = repayment_rate_after * len(df_prior)  
+
+projected_revenue_after = new_ticket_price * expected_paid_tickets
+
+revenue_increase = (projected_revenue_after - revenue_before) * 100
+
+
+print(f"Repayment rates: {repayment_rate_after:.2%}")
+print(f"Estimated change in revenue: ${revenue_increase:.2f}")
+```
+
+5.
+```{python}
+monthly_totals = df[df['violation_code'] == '964125_0964125B'].groupby('month').size().reset_index(name='total_tickets')
+monthly_paid = df[(df['violation_code'] == '964125_0964125B') & (df['total_payments'] > 0)].groupby('month').size().reset_index(name='paid_tickets')
+
+repayment_rates = pd.merge(monthly_totals, monthly_paid, on='month', how='left')
+repayment_rates['repayment_rate'] = repayment_rates['paid_tickets'] / repayment_rates['total_tickets']
+
+chart = alt.Chart(repayment_rates).mark_line().encode(
+    x=alt.X('month:T', title='Month'),
+    y=alt.Y('repayment_rate:Q', title='Repayment Rate', axis=alt.Axis(format='%')),
+).properties(
+    title='Repayment Rates of Tickets for missing stickers'
+)
+
+rule = alt.Chart(pd.DataFrame({'date': [price_increase_date]})).mark_rule(color='red').encode(
+    x='date:T'
+)
+
+text = alt.Chart(pd.DataFrame({'date': [price_increase_date]})).mark_text(
+    align='left',
+    baseline='middle',
+    dx=5
+).encode(
+    x='date:T',
+    text=alt.value('Policy Change')
+)
+
+chart = chart + rule + text
+
+chart.show()
+```
+
+6.
+```{python}
+violation_summary = df.groupby('violation_code').agg(
+    total_tickets=('ticket_number', 'size'),  
+    paid_tickets=('total_payments', lambda x: (x > 0).sum()), 
+    fine_amount=('fine_level1_amount', 'mean') 
+).reset_index()
+
+violation_summary['repayment_rate'] = violation_summary['paid_tickets'] / violation_summary['total_tickets']
+
+violation_summary['estimated_revenue'] = violation_summary['total_tickets'] * violation_summary['repayment_rate'] * violation_summary['fine_amount']
+
+top_violations = violation_summary.nlargest(3, 'estimated_revenue')
+
+
+bar_chart_revenue = alt.Chart(top_violations).mark_bar().encode(
+    x=alt.X('violation_code:N', title='Violation Code'),
+    y=alt.Y('estimated_revenue:Q', title='Estimated Revenue'),
+    color=alt.value('purple'),
+    tooltip=['violation_code', 'total_tickets', 'repayment_rate', 'fine_amount', 'estimated_revenue']
+).properties(
+    title='Top 3 Violation Types by estimated Revenue'
+)
+
+bar_chart_revenue.show()
+
+print("Three recommended violation type to maximize the revenue:")
+print(top_violations[['violation_code', 'total_tickets', 'repayment_rate', 'fine_amount', 'estimated_revenue']])
+```
+
+## Headlines and sub-messages (20 points)
+
+1. 
+```{python}
+df['violation_date'] = pd.to_datetime(df['issue_date'], errors='coerce')
+
+violation_summary = (
+    df.groupby('violation_description')
+    .agg(
+        total_tickets=('ticket_number', 'size'),
+        repayment_rate=('total_payments', lambda x: (x > 0).sum() / len(x)),  
+        average_fine=('fine_level1_amount', 'mean') 
+    )
+    .reset_index()
+)
+
+top_5_violations = violation_summary.sort_values(by='total_tickets', ascending=False).head(5)
+
+print("Top 5 Most Common Violation Descriptions:")
+print(top_5_violations[['violation_description', 'repayment_rate', 'average_fine', 'total_tickets']])
+
+```
+
+2. 
+```{python}
+filtered_data = violation_summary[violation_summary['total_tickets'] >= 100]
+outlier_fine = filtered_data['average_fine'].max()
+filtered_data = filtered_data[filtered_data['average_fine'] != outlier_fine]
+
+base = alt.Chart(filtered_data).encode(
+    x=alt.X('average_fine:Q', title='Average Fine', scale=alt.Scale(zero=False)),
+    y=alt.Y('repayment_rate:Q', title='Fraction of Tickets Paid', scale=alt.Scale(zero=False)),
+    tooltip=[
+        alt.Tooltip('violation_description:N', title='Violation Type'),
+        alt.Tooltip('average_fine:Q', title='Average Fine'),
+        alt.Tooltip('repayment_rate:Q', title='Repayment Rate', format='.2%'),
+        alt.Tooltip('total_tickets:Q', title='Total Tickets')
+    ]
+)
+
+scatter_plot_1 = base.mark_circle(size=80).properties(
+    title="Relationship Between Average Fine and Repayment Rate"
+)
+print("Graph 1:")
+print("Headline: 'Correlation Between Fine Size and Ticket Payment Rate'")
+print("Sub-message: There is a noticeable correlation where tickets with higher fines are less likely to be paid.\n")
+scatter_plot_1.display()
+
+scatter_plot_2 = base.mark_circle(size=80).encode(
+    color=alt.Color('total_tickets:Q', scale=alt.Scale(scheme='blues'), title='Total Tickets')
+).properties(
+    title="Average Fine vs Repayment Rate (Colored by Total Tickets)"
+)
+print("Graph 2:")
+print("Headline: 'Payment Rate vs Fine Amount (Color-Coded by Ticket Count)'")
+print("Sub-message: The color gradient indicates the number of tickets issued. Violations with more tickets tend to have lower fines and higher payment rates, whereas those with higher fines not only show lower payment rates but also represent fewer tickets overall.\n")
+scatter_plot_2.display()
+
+scatter_plot_3 = base.mark_circle().encode(
+    size=alt.Size('total_tickets:Q', title='Total Tickets', scale=alt.Scale(range=[20, 400]))
+).properties(
+    title="Average Fine vs Repayment Rate (Point Size by Total Tickets)"
+)
+print("Graph 3:")
+print("Headline: 'Payment Rate and Average Fine (Ticket Count Reflected by Point Size)'")
+print("Sub-message: The size of each point corresponds to the ticket volume. More common violations, represented by larger points, typically feature smaller fines and higher payment rates. In contrast, violations with larger fines are less common and have lower payment rates.\n")
+scatter_plot_3.display()
+
+```
+
+3. 
+## Plot 3 ("Average Fine vs Repayment Rate (Point Size by Total Tickets)") is the best choice for the City Clerk. It effectively visualizes the relationship between fine amounts and payment rates using point size to represent ticket frequency, making it easy to interpret without needing statistical knowledge. Plot 3 balances clarity and detail by showing both the frequency of violations and the relationship between fines and payments in a simple, intuitive format.
+
+
+## Understanding the structure of the data and summarizing it (Lecture 5, 20 Points)
+
+1. 
+```{python}
+violation_summary = df.groupby('violation_description').agg(
+    total_tickets=('ticket_number', 'size'),  
+    avg_fine_paid=('fine_level1_amount', 'mean'),  
+    avg_fine_unpaid=('fine_level2_amount', 'mean') 
+).reset_index()
+
+violation_summary_filtered = violation_summary[violation_summary['total_tickets'] >= 100]
+
+violation_summary_filtered['fine_doubles'] = violation_summary_filtered['avg_fine_unpaid'] >= 2 * violation_summary_filtered['avg_fine_paid']
+
+violations_not_doubling = violation_summary_filtered[violation_summary_filtered['fine_doubles'] == False]
+
+violations_not_doubling['increase_if_unpaid'] = ((violations_not_doubling['avg_fine_unpaid'] - violations_not_doubling['avg_fine_paid']) / violations_not_doubling['avg_fine_paid']) * 100
+
+print(violations_not_doubling[['violation_description', 'total_tickets', 'avg_fine_paid', 'avg_fine_unpaid', 'increase_if_unpaid']])
+
+
+```
+
+2.
+##4-2
+Initial Stage:
+  |
+  v
+"VIOL" (Violation Issued)
+  |
+  |---> [Paid] -----> Process Ends
+  |
+  v
+"DETR" (Determination Notice)
+  |
+  |---> [Paid] -----> Process Ends
+  |
+  v
+"SEIZ" (Seizure Warning)
+  |
+  |---> [Paid] -----> Process Ends
+  |
+  v
+[Unpaid] -----> Escalates to Legal Action
+
+-------------------------------
+Contestation:
+  |
+  v
+[Contest Ticket]
+  | 
+  |---> [Liable] -----> Continue Process (as unpaid)
+  |
+  |---> [Not Liable] -----> Ticket Dismissed
+
+3.
+```{python}
+import pandas as pd
+import altair as alt
+
+
+violation_summary = df.groupby('violation_description').agg({
+    'ticket_number': 'count',
+    'current_amount_due': 'mean',
+    'total_payments': lambda x: (x > 0).mean()
+}).reset_index()
+
+violation_summary.columns = ['violation_description', 'total_tickets', 'average_fine', 'fraction_paid']
+
+
+filtered_data = violation_summary[violation_summary['total_tickets'] >= 100]
+
+
+outlier_fine = filtered_data['average_fine'].max()
+filtered_data = filtered_data[filtered_data['average_fine'] != outlier_fine]
+
+
+top_10_violations = filtered_data.nlargest(10, 'total_tickets')['violation_description'].tolist()
+
+
+def categorize_violation(violation):
+    if violation in top_10_violations:
+        return violation
+    return 'Other'
+
+filtered_data['violation_category'] = filtered_data['violation_description'].apply(categorize_violation)
+
+
+base = alt.Chart(filtered_data).encode(
+    x=alt.X('average_fine:Q', title='Average Fine', scale=alt.Scale(zero=False)),
+    y=alt.Y('fraction_paid:Q', title='Fraction of Tickets Paid', scale=alt.Scale(zero=False)),
+    tooltip=[
+        alt.Tooltip('violation_description:N', title='Violation Type'),
+        alt.Tooltip('average_fine:Q', title='Average Fine'),
+        alt.Tooltip('fraction_paid:Q', title='Fraction Paid', format='.2%'),
+        alt.Tooltip('total_tickets:Q', title='Total Tickets')
+    ]
+)
+
+
+scatter_plot_with_description = base.mark_circle(size=80).encode(
+    color=alt.Color('violation_category:N', scale=alt.Scale(scheme='category20'))
+) + base.mark_text(align='left', dx=7).encode(
+    text='violation_description:N'  
+)
+
+scatter_plot_with_description = scatter_plot_with_description.properties(
+    title="Fine Amount vs Fraction Paid (Description Next to Dots)",
+    width=400,
+    height=400
+)
+
+
+scatter_plot_with_description.display()
+
+
+
+scatter_plot_with_top10_and_other = base.mark_circle(size=80).encode(
+    color=alt.Color('violation_category:N', scale=alt.Scale(scheme='category20'))
+) + base.mark_text(align='left', dx=7).encode(
+    text=alt.condition(
+        alt.datum.violation_category != 'Other',
+        'violation_category:N',  
+        alt.value('Other')  
+    )
+)
+
+scatter_plot_with_top10_and_other = scatter_plot_with_top10_and_other.properties(
+    title="Fine Amount vs Fraction Paid (Top 10 + Other)",
+    width=400,
+    height=400
+)
+
+
+scatter_plot_with_top10_and_other.display()
+
+
+
+def categorize_violation_meaningful(violation):
+    if 'PARKING' in violation:
+        return 'Parking Violation'
+    elif 'PERMIT' in violation:
+        return 'Permit Violation'
+    elif 'METER' in violation:
+        return 'Meter Violation'
+    elif 'REGISTRATION' in violation or 'LICENSE' in violation:
+        return 'Registration/License Violation'
+    else:
+        return 'Other Violation'
+
+filtered_data['meaningful_category'] = filtered_data['violation_description'].apply(categorize_violation_meaningful)
+
+
+scatter_plot_meaningful = base.mark_circle(size=80).encode(
+    color=alt.Color('meaningful_category:N', scale=alt.Scale(scheme='category10'), legend=alt.Legend(title="Violation Category"))
+)
+
+scatter_plot_meaningful = scatter_plot_meaningful.properties(
+    title="Fine Amount vs Fraction Paid (Meaningful Categories)",
+    width=400,
+    height=400
+)
+
+
+scatter_plot_with_description.display()  
+scatter_plot_with_top10_and_other.display()  
+scatter_plot_meaningful.display()  
+
+
+```
+
+## Extra Credit (max 5 points)
+
+1.
+```{python}
+violation_counts = df.groupby(['violation_code', 'violation_description']).size().reset_index(name='count')
+
+multiple_descriptions = violation_counts.groupby('violation_code').filter(lambda x: len(x) > 1)
+
+most_common_descriptions = multiple_descriptions.loc[multiple_descriptions.groupby('violation_code')['count'].idxmax()]
+
+df['most_common_description'] = df['violation_code'].map(most_common_descriptions.set_index('violation_code')['violation_description'])
+
+top_codes = multiple_descriptions.groupby('violation_code')['count'].sum().nlargest(3).index
+print("Top three codes with multiple descriptions:")
+print(multiple_descriptions[multiple_descriptions['violation_code'].isin(top_codes)])
+
+```
+
+2. 
+##6-2
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "description": "A custom case progression tree.",
+  "width": 600,
+  "height": 800,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "tree",
+      "values": [
+        {"id": "Initial Stage", "parent": null},
+        {"id": "VIOL (Violation Issued)", "parent": "Initial Stage"},
+        {"id": "Paid_1", "parent": "VIOL (Violation Issued)"},
+        {"id": "Process Ends_1", "parent": "Paid_1"},
+        {"id": "DETR (Determination Notice)", "parent": "VIOL (Violation Issued)"},
+        {"id": "Paid_2", "parent": "DETR (Determination Notice)"},
+        {"id": "Process Ends_2", "parent": "Paid_2"},
+        {"id": "SEIZ (Seizure Warning)", "parent": "DETR (Determination Notice)"},
+        {"id": "Paid_3", "parent": "SEIZ (Seizure Warning)"},
+        {"id": "Process Ends_3", "parent": "Paid_3"},
+        {"id": "Unpaid", "parent": "SEIZ (Seizure Warning)"},
+        {"id": "Escalates to Legal Action", "parent": "Unpaid"},
+        {"id": "Contestation", "parent": "Initial Stage"},
+        {"id": "Contest Ticket", "parent": "Contestation"},
+        {"id": "Liable", "parent": "Contest Ticket"},
+        {"id": "Continue Process (as unpaid)", "parent": "Liable"},
+        {"id": "Not Liable", "parent": "Contest Ticket"},
+        {"id": "Ticket Dismissed", "parent": "Not Liable"}
+      ],
+      "transform": [
+        {
+          "type": "stratify",
+          "key": "id",
+          "parentKey": "parent"
+        },
+        {
+          "type": "tree",
+          "method": "tidy",
+          "size": [{"signal": "height"}, {"signal": "width - 100"}],
+          "separation": true,
+          "as": ["y", "x", "depth", "children"]
+        }
+      ]
+    },
+    {
+      "name": "links",
+      "source": "tree",
+      "transform": [
+        {"type": "treelinks"},
+        {
+          "type": "linkpath",
+          "orient": "horizontal",
+          "shape": "diagonal"
+        }
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "color",
+      "type": "linear",
+      "range": {"scheme": "category20"},
+      "domain": {"data": "tree", "field": "depth"},
+      "zero": true
+    }
+  ],
+
+  "marks": [
+    {
+      "type": "path",
+      "from": {"data": "links"},
+      "encode": {
+        "update": {
+          "path": {"field": "path"},
+          "stroke": {"value": "#ccc"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "tree"},
+      "encode": {
+        "enter": {
+          "size": {"value": 100},
+          "stroke": {"value": "#fff"}
+        },
+        "update": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "fill": {"scale": "color", "field": "depth"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "tree"},
+      "encode": {
+        "enter": {
+          "text": {"field": "id"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "middle"}
+        },
+        "update": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "dx": {"signal": "datum.children ? -7 : 7"},
+          "align": {"signal": "datum.children ? 'right' : 'left'"}
+        }
+      }
+    }
+  ]
+}
+
